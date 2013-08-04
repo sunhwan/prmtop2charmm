@@ -139,11 +139,11 @@ class prmtop_parser():
                 self._add_residue(resid)
                 resid = [resid[1], None]
 
-        self._add_residue((resid[0], len(self.mol.atom_list)))
+        self._add_residue((resid[0], len(self.mol.atom_list)+1))
 
     def _add_residue(self, resid):
         resname = self.mol.resnames[self.count]
-        for i in range(resid[0]-1, resid[1]):
+        for i in range(resid[0]-1, resid[1]-1):
             self.mol.residues[resname].append(self.mol.atom_list[i])
             self.mol.atoms[self.mol.atom_list[i]]['resname'] = resname
             self.mol.atoms[self.mol.atom_list[i]]['resid'] = self.count + 1
@@ -360,7 +360,7 @@ NBFIX
     _bond = "%(atom1)4s %(atom2)4s %(force)8.4f %(dist)8.4f"
     _angl = "%(atom1)4s %(atom2)4s %(atom3)4s %(force)8.4f %(phi)8.4f"
     _dihe = "%(atom1)4s %(atom2)4s %(atom3)4s %(atom4)4s %(force)8.4f %(period)4d %(phase)8.4f"
-    _nonb = "%(atom1)4s %(atom2)4s %(eps)16.8f %(rmin)16.8f"
+    _nonb = "%(type1)4s %(type2)4s %(eps)16.8f %(rmin)16.8f"
 
     atoms = [_mass % {'type_index': k, 'type': v['type'], 'mass': v['mass']} for k,v in prmtop.atom_type.items()]
 
@@ -406,7 +406,7 @@ NBFIX
         a = prmtop.params['lj']['a'][k]
         b = prmtop.params['lj']['b'][k]
         sigma = pow(a/b, 1/6.0)
-        eps = b**2 / 4.0 / a
+        eps = -b**2 / 4.0 / a
         rmin = pow(2, 1/6.0)*sigma
         vdws.append(_nonb % locals())
 
