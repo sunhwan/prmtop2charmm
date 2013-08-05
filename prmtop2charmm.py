@@ -14,6 +14,7 @@ class molecules():
     atom_list = []
     atoms = {}
     bonds = []
+    nonbonded = []
     angles = []
     torsions = []
     atom_type = {}
@@ -121,7 +122,10 @@ class prmtop_parser():
 
     def parse_excluded_atoms(self, line): pass
     def parse_number_excluded_atoms(self, line): pass
-    def parse_nonbonded_parm_index(self, line): pass
+
+    def parse_nonbonded_parm_index(self, line):
+        for index in self._parse(line):
+            self.mol.nonbonded.append(int(index))
     
     def parse_residue_label(self, line):
         for resn in self._parse(line):
@@ -225,9 +229,11 @@ class prmtop_parser():
             name = self.mol.atom_list[self.count]
             self.count += 1
             index = self.mol.atoms[name]['type_index']
-            self.mol.atoms[name]['type'] = atomtype
-            if self.mol.atom_type.has_key(index): continue
+            if self.mol.atom_type.has_key(index):
+                self.mol.atoms[name]['type'] = self.mol.atom_type[index]['type']
+                continue
             self.mol.atom_type[index] = {'id': index, 'type': atomtype, 'mass': self.mol.atoms[name]['mass']}
+            self.mol.atoms[name]['type'] = atomtype
 
     def parse_solty(self, line): pass
     def parse_hbond_acoef(self, line): pass
@@ -258,58 +264,7 @@ def build_molecules(prmtop):
                 resi.add_edge(atom1, atom2)
         molecules.append(resi)
 
-    for bond in prmtop.bonds:
-        atom1 = prmtop.atom_list[bond[0]]
-        atom2 = prmtop.atom_list[bond[1]]
-
-        type1 = prmtop.atoms[atom1]['type']
-        type2 = prmtop.atoms[atom2]['type']
-        pair = tuple(sorted((type1, type2)))
-        if prms['bond'].has_key(pair): continue
-        index = bond[2] - 1
-        prms['bond'][pair] = \
-            {'force': prmtop.params['bond']['force'][index],
-             'dist': prmtop.params['bond']['dist'][index]}
-
-    for angl in prmtop.angles:
-        atom1 = prmtop.atom_list[angl[0]]
-        atom2 = prmtop.atom_list[angl[1]]
-        atom3 = prmtop.atom_list[angl[2]]
-
-        type1 = prmtop.atoms[atom1]['type']
-        type2 = prmtop.atoms[atom2]['type']
-        type3 = prmtop.atoms[atom3]['type']
-        pair = tuple(sorted((type1, type2, type3)))
-        if prms['bond'].has_key(pair): continue
-        index = angl[3] - 1
-        prms['angle'][pair] = \
-            {'force': prmtop.params['angle']['force'][index],
-             'phi': prmtop.params['angle']['phi'][index]}
-
-    for tors in prmtop.torsions:
-        atom1 = prmtop.atom_list[tors[0]]
-        atom2 = prmtop.atom_list[tors[1]]
-        atom3 = prmtop.atom_list[tors[2]]
-        atom4 = prmtop.atom_list[tors[3]]
-
-        type1 = prmtop.atoms[atom1]['type']
-        type2 = prmtop.atoms[atom2]['type']
-        type3 = prmtop.atoms[atom3]['type']
-        type4 = prmtop.atoms[atom4]['type']
-        pair = tuple(sorted((type1, type2, type3, type4)))
-        if prms['torsion'].has_key(pair): continue
-        index = tors[4] - 1
-        prms['torsion'][pair] = \
-            {'force': prmtop.params['torsion']['force'][index],
-             'phase': prmtop.params['torsion']['phase'][index],
-             'period': prmtop.params['torsion']['period'][index],
-             'scee': prmtop.params['torsion']['scee'][index],
-             'scnb': prmtop.params['torsion']['scnb'][index]}
-
-    for i, pair in enumerate(itertools.combinations(sorted(prmtop.atom_type.keys()), 2)):
-        prms['lj'][pair] = {'a': prmtop.params['lj']['a'][i], 'b': prmtop.params['lj']['b'][i]}
-
-    return molecules, prms
+    return molecules
 
 def build_rtf(molecules, prmtop, prefix):
     _rtf = """* %(title)s
@@ -350,6 +305,9 @@ ANGLES
 DIHEDRALS
 %(torsions)s
 
+IMPROPER
+%(impropers)s
+
 NONBONDED nbxmod  5 atom cdiel fshift vatom vdistance vfswitch -
 cutnb 14.0 ctofnb 12.0 ctonnb 10.0 eps 1.0 e14fac 1.0 wmin 1.5 
 
@@ -360,6 +318,7 @@ NBFIX
     _bond = "%(atom1)4s %(atom2)4s %(force)8.4f %(dist)8.4f"
     _angl = "%(atom1)4s %(atom2)4s %(atom3)4s %(force)8.4f %(phi)8.4f"
     _dihe = "%(atom1)4s %(atom2)4s %(atom3)4s %(atom4)4s %(force)8.4f %(period)4d %(phase)8.4f"
+    _imph = "%(atom1)4s %(atom2)4s %(atom3)4s %(atom4)4s %(force)8.4f 0 %(phase)8.4f"
     _nonb = "%(type1)4s %(type2)4s %(eps)16.8f %(rmin)16.8f"
 
     atoms = [_mass % {'type_index': k, 'type': v['type'], 'mass': v['mass']} for k,v in prmtop.atom_type.items()]
@@ -385,26 +344,43 @@ NBFIX
         angles[prm[3]] = {'atom1': type1, 'atom2': type2, 'atom3': type3, 'force': prmtop.params['angle']['force'][prm[3]-1], 'phi': prmtop.params['angle']['phi'][prm[3]-1]}
 
     torsions = {}
+    imph = {}
     for prm in prmtop.torsions:
         #if torsions.has_key(prm[4]): continue
-        atom1 = prmtop.atom_list[prm[0]]
-        atom2 = prmtop.atom_list[prm[1]]
-        atom3 = prmtop.atom_list[prm[2]]
-        atom4 = prmtop.atom_list[prm[3]]
+        atom1 = prmtop.atom_list[abs(prm[0])]
+        atom2 = prmtop.atom_list[abs(prm[1])]
+        atom3 = prmtop.atom_list[abs(prm[2])]
+        atom4 = prmtop.atom_list[abs(prm[3])]
         type1 = prmtop.atoms[atom1]['type']
         type2 = prmtop.atoms[atom2]['type']
         type3 = prmtop.atoms[atom3]['type']
         type4 = prmtop.atoms[atom4]['type']
-        torsions[prm[4]] = {'atom1': type1, 'atom2': type2, 'atom3': type3, 'atom4': type4, 'force': prmtop.params['torsion']['force'][prm[4]-1], 'phase': prmtop.params['torsion']['phase'][prm[4]-1], 'period': prmtop.params['torsion']['period'][prm[4]-1]}
+        _atoms = (type1, type2, type3, type4)
+        _torsions = torsions
+
+        if prm[3] < 0:
+            _torsions = imph
+            #imph[prm[4]] = {'atom1': type2, 'atom2': type1, 'atom3': type3, 'atom4': type4, 'force': prmtop.params['torsion']['force'][prm[4]-1], 'phase': prmtop.params['torsion']['phase'][prm[4]-1], 'period': prmtop.params['torsion']['period'][prm[4]-1]}
+
+        if _torsions.has_key(_atoms[::-1]):
+            _atoms = _atoms[::-1]
+
+        if not _torsions.has_key(_atoms):
+            _torsions[_atoms] = {'atom1': type1, 'atom2': type2, 'atom3': type3, 'atom4': type4, 'param': []}
+        torsion = {'force': prmtop.params['torsion']['force'][prm[4]-1], 'phase': prmtop.params['torsion']['phase'][prm[4]-1], 'period': prmtop.params['torsion']['period'][prm[4]-1]}
+        if torsion not in _torsions[_atoms]['param']:
+            _torsions[_atoms]['param'].append(torsion)
+
+    print imph
 
     vdws = []
-    for k, (i, j) in enumerate(itertools.combinations(prmtop.atom_type, 2)):
-        atom1 = prmtop.atom_list[i]
-        atom2 = prmtop.atom_list[j]
-        type1 = prmtop.atoms[atom1]['type']
-        type2 = prmtop.atoms[atom2]['type']
-        a = prmtop.params['lj']['a'][k]
-        b = prmtop.params['lj']['b'][k]
+    for k, (i, j) in enumerate(itertools.product(sorted(prmtop.atom_type.keys()), repeat=2)):
+        if j < i: continue
+        type1 = prmtop.atom_type[i]['type']
+        type2 = prmtop.atom_type[j]['type']
+        index = prmtop.nonbonded[k] - 1
+        a = prmtop.params['lj']['a'][index]
+        b = prmtop.params['lj']['b'][index]
         sigma = pow(a/b, 1/6.0)
         eps = -b**2 / 4.0 / a
         rmin = pow(2, 1/6.0)*sigma
@@ -413,7 +389,8 @@ NBFIX
     mass = "\n".join(sorted(set(atoms)))
     bonds = "\n".join([_bond % bonds[k] for k in sorted(bonds.keys())])
     angles = "\n".join([_angl % angles[k] for k in sorted(angles.keys())])
-    torsions = "\n".join([_dihe % torsions[k] for k in sorted(torsions.keys())])
+    torsions = "\n".join(["\n".join([_dihe % dict(par.items()+torsions[k].items()) for par in torsions[k]['param']]) for k in sorted(torsions.keys())])
+    impropers = "\n".join(["\n".join([_imph % dict(par.items()+imph[k].items()) for par in imph[k]['param']]) for k in sorted(imph.keys())])
     nonbonds = "\n".join(vdws)
     title = prmtop.title
 
@@ -428,7 +405,7 @@ def main():
 
     parser = prmtop_parser()
     parser.parse(args.prmtop)
-    molecules, prms = build_molecules(parser.mol)
+    molecules = build_molecules(parser.mol)
 
     build_rtf(molecules, parser.mol, args.prefix)
     build_prm(parser.mol, args.prefix)
