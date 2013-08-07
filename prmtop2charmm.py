@@ -28,11 +28,13 @@ RESI %(resi)8s %(charge)9.4f
 GROUP
 %(atoms)s
 %(bonds)s
+%(imph)s
 """
     _atom = "ATOM %(name)8s %(type)8s %(charge)9.4f"
     _bond = "BOND %s"
+    _imph = "IMPH %s %s %s %s"
 
-    def rtf(self):
+    def rtf(self, prmtop):
         resi = self.graph['residue']
         atoms = []
         bonds = []
@@ -46,8 +48,20 @@ GROUP
         for i in range(0, len(edges), 5):
             bonds.append(self._bond % " ".join(["%4s %4s" % edge for edge in edges[i:i+5]]))
 
+        imphs = []
+        for prm in prmtop.torsions:
+            atom1 = prmtop.atom_list[abs(prm[0])]
+            if not self.has_node(atom1): continue
+            atom2 = prmtop.atom_list[abs(prm[1])]
+            atom3 = prmtop.atom_list[abs(prm[2])]
+            atom4 = prmtop.atom_list[abs(prm[3])]
+            if prm[3] > 0: continue
+            _atoms = (atom1, atom2, atom3, atom4)
+            imphs.append(self._imph % _atoms)
+
         atoms = "\n".join(atoms)
         bonds = "\n".join(bonds)
+        imph = "\n".join(imphs)
         return self._rtf % locals()
         
 class prmtop_parser():
@@ -281,7 +295,7 @@ def build_rtf(molecules, prmtop, prefix):
     residues = ""
     for mol in molecules:
         atoms.extend([_mass % data for atom,data in mol.nodes(True)])
-        residues += mol.rtf()
+        residues += mol.rtf(prmtop)
 
     mass = "\n".join(sorted(set(atoms)))
     title = prmtop.title
@@ -311,6 +325,8 @@ IMPROPER
 NONBONDED nbxmod  5 atom cdiel fshift vatom vdistance vfswitch -
 cutnb 14.0 ctofnb 12.0 ctonnb 10.0 eps 1.0 e14fac 1.0 wmin 1.5 
 
+%(dummy)s
+
 NBFIX
 %(nonbonds)s
 """
@@ -318,8 +334,9 @@ NBFIX
     _bond = "%(atom1)4s %(atom2)4s %(force)8.4f %(dist)8.4f"
     _angl = "%(atom1)4s %(atom2)4s %(atom3)4s %(force)8.4f %(phi)8.4f"
     _dihe = "%(atom1)4s %(atom2)4s %(atom3)4s %(atom4)4s %(force)8.4f %(period)4d %(phase)8.4f"
-    _imph = "%(atom1)4s %(atom2)4s %(atom3)4s %(atom4)4s %(force)8.4f 0 %(phase)8.4f"
-    _nonb = "%(type1)4s %(type2)4s %(eps)16.8f %(rmin)16.8f"
+    _imph = "%(atom1)4s %(atom2)4s %(atom3)4s %(atom4)4s %(force)8.4f %(period)4d %(phase)8.4f"
+    _dumm = "%(type1)4s 0.0 0.0 0.0"
+    _nonb = "%(type1)4s %(type2)4s %(eps)16.8f %(rmin)16.8f %(eps14)16.8f %(rmin)16.8f"
 
     atoms = [_mass % {'type_index': k, 'type': v['type'], 'mass': v['mass']} for k,v in prmtop.atom_type.items()]
 
@@ -371,8 +388,7 @@ NBFIX
         if torsion not in _torsions[_atoms]['param']:
             _torsions[_atoms]['param'].append(torsion)
 
-    print imph
-
+    dummy = []
     vdws = []
     for k, (i, j) in enumerate(itertools.product(sorted(prmtop.atom_type.keys()), repeat=2)):
         if j < i: continue
@@ -384,6 +400,9 @@ NBFIX
         sigma = pow(a/b, 1/6.0)
         eps = -b**2 / 4.0 / a
         rmin = pow(2, 1/6.0)*sigma
+        eps14 = eps / 2
+        if type1 == type2:
+            dummy.append(_dumm % locals())
         vdws.append(_nonb % locals())
 
     mass = "\n".join(sorted(set(atoms)))
@@ -391,6 +410,7 @@ NBFIX
     angles = "\n".join([_angl % angles[k] for k in sorted(angles.keys())])
     torsions = "\n".join(["\n".join([_dihe % dict(par.items()+torsions[k].items()) for par in torsions[k]['param']]) for k in sorted(torsions.keys())])
     impropers = "\n".join(["\n".join([_imph % dict(par.items()+imph[k].items()) for par in imph[k]['param']]) for k in sorted(imph.keys())])
+    dummy = "\n".join(dummy)
     nonbonds = "\n".join(vdws)
     title = prmtop.title
 
